@@ -139,10 +139,41 @@ Jalankan `wibu-cli --probe <judul>` untuk melihat sampai mana prosesnya
 berhasil. Kalau resolve dapat URL tapi MPV gagal, coba buka URL tersebut
 dengan `mpv` langsung untuk melihat pesan errornya.
 
-## Status
+## Status proyek
 
-Yang sudah dites: Linux x86_64. macOS dan Windows kemungkinan bisa di-build,
-tapi belum saya coba. Kalau nemu masalah di platform lain, buka issue saja.
+Proyek ini masih tahap awal dan masih saya kembangkan sambil dipakai. Tapi
+bukan cuma rancangan: binary-nya sudah jalan, instalasi dari GitHub sudah
+dicoba, dan alur cari anime sampai putar di MPV sudah dites langsung.
+
+Beberapa hal yang masih bisa berubah: tampilan terminal, penanganan error, dan
+dukungan platform. Kalau sumbernya mengubah struktur HTML, resolver juga bisa
+perlu disesuaikan.
+
+## Pengujian
+
+Pengujian otomatis:
+
+- `cargo test` — 11 unit test untuk parser AnimeKu, resolver embed, dan parser
+  Otakudesu.
+- `cargo fmt --check`, `cargo check --locked`, dan `cargo build --release
+  --locked` berjalan tanpa error.
+- CI GitHub Actions menjalankan format, check, test, dan build setiap push ke
+  `main`.
+
+Pengujian manual:
+
+- `--probe frieren 0` berhasil dari pencarian, daftar episode, ambil server,
+  sampai resolve HLS AnimeKu.
+- `--resolve https://putarin.biz/e/BGusdRwJje` menghasilkan URL HLS yang valid.
+- Hasil resolve dicek dengan `ffprobe`: HLS 1280×720, H.264 + AAC.
+- Pemutaran dites dengan MPV sampai decode berjalan (exit 0).
+- Fallback Otakudesu berhasil mencari anime dan resolve video.
+- Jelajah kategori Film berhasil menampilkan 30 judul dengan pagination.
+- `cargo install --git https://github.com/Panz-08/wibu-cli --locked` berhasil
+  di direktori instalasi bersih.
+
+Yang belum dites: macOS dan Windows. Build-nya kemungkinan jalan, tapi belum
+saya coba. Kalau nemu masalah di platform lain, buka issue.
 
 ## Kredit
 
