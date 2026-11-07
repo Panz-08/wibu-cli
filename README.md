@@ -20,6 +20,22 @@ sekalian saya rapikan dan taruh di sini. Kalau ada yang ikut pakai, silakan.
   terminal terlalu sempit.
 - Link download ditampilkan kalau sumbernya menyediakan.
 
+## Tampilan
+
+Gambar-gambar ini diambil dari aplikasi yang benar-benar dijalankan, bukan mockup.
+
+Menu utama:
+
+<img src="assets/menu.png" alt="Menu utama wibu-cli" width="720">
+
+Kartu anime, poster, dan daftar episode:
+
+<img src="assets/detail.png" alt="Detail anime dengan poster dan daftar episode" width="820">
+
+Contoh resolve HLS lewat `--probe`:
+
+<img src="assets/probe.png" alt="Hasil probe resolve HLS" width="720">
+
 ## Instalasi
 
 Butuh Rust dan `mpv` di `PATH`.
