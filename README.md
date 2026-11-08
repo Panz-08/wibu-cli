@@ -104,6 +104,52 @@ wibu-cli --resolve 'https://putarin.biz/e/BGusdRwJje'
 `--probe` dan `--resolve` dipakai buat ngecek apakah sumber dan resolver masih
 jalan. Keduanya tidak butuh terminal interaktif.
 
+### Contoh output `--probe`
+
+Output asli dipotong, tapi urutannya seperti ini:
+
+```text
+$ wibu-cli --probe frieren 0
+[1/5] sumber: AnimeKu
+[2/5] mencari 'frieren' ...
+  - Sousou no Frieren
+[3/5] memuat episode 'Sousou no Frieren' ...
+  28 episode, 8 info, 2 link download
+  - Episode 28
+  - Episode 27
+[4/5] memuat server 'Episode 28' ...
+  - Server 1
+  - Server 2
+[5/5] resolve 'Server 1' ...
+  OK: https://contoh-host/api/hls?t=...
+```
+
+Kalau resolve gagal, baris terakhir berubah menjadi `GAGAL resolve` dan proses
+keluar dengan status 1.
+
+## AnimeKu vs Otakudesu
+
+| | AnimeKu (utama) | Otakudesu (cadangan) |
+| --- | --- | --- |
+| Kapan dipakai | default, atau `--source animeku` | otomatis saat AnimeKu gagal, atau `--source otakudesu` |
+| Katalog | ongoing, selesai, film, dan halaman berikutnya | pencarian dan daftar episode |
+| Pagination | didukung | tidak, hanya hasil pencarian |
+| Resolver | `putarin.biz` / `puterin.biz` lewat `window.__PX` | iframe player, resolve langsung |
+| Poster | tampil kalau terminal ≥ 62 kolom | tampil kalau sumber menyediakan |
+| Link download | kalau tersedia | kalau tersedia |
+
+Fallback otomatis **hanya** terjadi kalau sumber tidak dipaksa. Kalau kamu
+menjalankan `--source animeku`, kegagalan AnimeKu akan ditampilkan apa adanya
+tanpa berpindah ke Otakudesu.
+
+Contoh membandingkan kedua sumber:
+
+```bash
+wibu-cli --probe "sousou no frieren" --source animeku
+wibu-cli --probe "sousou no frieren" --source otakudesu
+wibu-cli --source otakudesu          # seluruh sesi memakai Otakudesu
+```
+
 ## Variabel lingkungan
 
 | Variabel | Fungsi |
@@ -133,10 +179,41 @@ dipakai terlihat di kartu metadata.
 
 ## Troubleshooting
 
-**MPV tidak ditemukan**
+**`MPV tidak ditemukan di PATH.`**
 
 Install `mpv`, lalu cek dengan `mpv --version`. Kalau tetap tidak ketemu,
-pastikan lokasi binary-nya ada di `PATH`.
+pastikan lokasi binary-nya ada di `PATH`. Di Windows, tambahkan folder tempat
+`mpv.exe` berada ke `PATH` lalu buka terminal baru.
+
+**`wibu-cli harus dijalankan langsung di terminal interaktif.`**
+
+Mode interaktif butuh stdin dan stdout berupa TTY. Jalankan `wibu-cli` langsung
+dari terminal, bukan lewat pipe, cron, atau `nohup`. Untuk pengecekan otomatis,
+pakai `--probe` atau `--resolve` yang tidak butuh TTY.
+
+**`AnimeKu: ...` lalu `Otakudesu: ...`**
+
+Kedua sumber gagal dihubungi. Biasanya ini masalah jaringan atau domain sumber
+berubah. Cek koneksi, lalu coba `WIBU_ANIMEKU_BASE=https://ww2.animeku.lol`.
+Kalau hanya AnimeKu yang bermasalah, fallback Otakudesu akan dipakai otomatis
+(tanpa `--source`).
+
+**`Tidak ada server streaming untuk episode ini.`**
+
+Episode ada, tetapi tidak ada iframe player yang bisa di-resolve. Coba episode
+lain, atau jalankan `wibu-cli --probe <judul>` untuk melihat server apa yang
+terdeteksi.
+
+**`Server ini tidak mengembalikan tautan video.`**
+
+Server mengembalikan halaman yang tidak berisi URL HLS. Coba server lain di
+daftar, atau cek apakah resolver masih cocok dengan struktur halaman sumber.
+
+**`MPV keluar dengan status N`**
+
+Resolve berhasil tapi MPV menolak URL/stream. Coba buka URL hasil `--probe`
+langsung dengan `mpv <url>` untuk melihat pesan lengkap. Kalau memakai
+`WIBU_BROWSER=1`, video dibuka di browser, jadi masalah MPV tidak berlaku.
 
 **AnimeKu error atau lambat**
 
@@ -191,6 +268,13 @@ Pengujian manual:
 
 Yang belum dites: macOS dan Windows. Build-nya kemungkinan jalan, tapi belum
 saya coba. Kalau nemu masalah di platform lain, buka issue.
+
+| Platform | Status |
+| --- | --- |
+| Linux x86_64 | ✅ dites (build, install dari GitHub, putar di MPV) |
+| macOS (Intel/Apple Silicon) | ⚠️ belum dites |
+| Windows | ⚠️ belum dites |
+| Linux ARM (Raspberry Pi, dll.) | ⚠️ belum dites |
 
 ## Kredit
 
