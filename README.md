@@ -1,6 +1,7 @@
 # wibu-cli
 
 [![CI](https://github.com/Panz-08/wibu-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Panz-08/wibu-cli/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Panz-08/wibu-cli?display_name=tag)](https://github.com/Panz-08/wibu-cli/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Nonton anime sub Indo dari terminal. Anime diambil dari AnimeKu, lalu diputar
