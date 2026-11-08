@@ -247,7 +247,7 @@ perlu disesuaikan.
 
 Pengujian otomatis:
 
-- `cargo test` — 11 unit test untuk parser AnimeKu, resolver embed, dan parser
+- `cargo test` - 11 unit test untuk parser AnimeKu, resolver embed, dan parser
   Otakudesu.
 - `cargo fmt --check`, `cargo check --locked`, dan `cargo build --release
   --locked` berjalan tanpa error.

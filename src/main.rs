@@ -313,7 +313,7 @@ Variabel lingkungan:
 
 Sumber utama: AnimeKu (https://animeku.lol)
 Cadangan: Otakudesu (https://otakudesu.blog)
-Dibuat oleh panz-08 — https://github.com/Panz-08/wibu-cli",
+Dibuat oleh panz-08 - https://github.com/Panz-08/wibu-cli",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -570,7 +570,7 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
         return Ok(false);
     }
 
-    let title = format!("{} — {}", movie.title, episode.title);
+    let title = format!("{} - {}", movie.title, episode.title);
     match crate::util::play_with_mpv(&url, &title, &episode.id) {
         Ok(()) => Ok(true),
         Err(err) => {
