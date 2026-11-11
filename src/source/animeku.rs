@@ -118,7 +118,10 @@ impl Animeku {
                     SearchMode::Ongoing => "ongoing",
                     SearchMode::Completed => "selesai",
                     SearchMode::Movie => "film",
-                    SearchMode::All => unreachable!(),
+                    SearchMode::All
+                    | SearchMode::JapanMovie
+                    | SearchMode::JapanSeries
+                    | SearchMode::Tokusatsu => unreachable!(),
                 };
 
                 if let Some(url) = self.categories.get(key) {
@@ -129,7 +132,10 @@ impl Animeku {
                     SearchMode::Ongoing => "/jalan-uf5ms8g/",
                     SearchMode::Completed => "/selesai-bjyzaqn/",
                     SearchMode::Movie => "/film-anime-6d23pb8/",
-                    SearchMode::All => "",
+                    SearchMode::All
+                    | SearchMode::JapanMovie
+                    | SearchMode::JapanSeries
+                    | SearchMode::Tokusatsu => "",
                 };
 
                 Ok(format!("{}{fallback}", self.base))

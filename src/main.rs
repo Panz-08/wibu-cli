@@ -10,7 +10,9 @@ use reqwest::Client;
 use crate::{
     input::{choice, confirm, main_menu, optional_query, search_prompt, MenuAction},
     models::{Episode, Listing, Meta, Movie, SearchMode, Stream},
-    source::{animeku::Animeku, embed, otakudesu::Otakudesu, Source},
+    source::{
+        animeku::Animeku, embed, lk21::Lk21, otakudesu::Otakudesu, tokusatsu::Tokusatsuindo, Source,
+    },
     util::{
         clearscreen_and_show_banner, error, info, loading, open_in_browser, print_rule,
         show_meta_card, truncate, warn,
@@ -26,11 +28,15 @@ mod util;
 enum SourceKind {
     Animeku,
     Otakudesu,
+    Lk21,
+    Tokusatsu,
 }
 
 enum BackendKind {
     Animeku(Animeku),
     Otakudesu(Otakudesu),
+    Lk21(Lk21),
+    Tokusatsu(Tokusatsuindo),
 }
 
 struct Backend {
@@ -42,6 +48,8 @@ impl Backend {
     fn new(forced: Option<SourceKind>) -> Self {
         let kind = match forced {
             Some(SourceKind::Otakudesu) => BackendKind::Otakudesu(Otakudesu::new()),
+            Some(SourceKind::Lk21) => BackendKind::Lk21(Lk21::new()),
+            Some(SourceKind::Tokusatsu) => BackendKind::Tokusatsu(Tokusatsuindo::new()),
             _ => BackendKind::Animeku(Animeku::new()),
         };
 
@@ -52,6 +60,8 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.name(),
             BackendKind::Otakudesu(source) => source.name(),
+            BackendKind::Lk21(source) => source.name(),
+            BackendKind::Tokusatsu(source) => source.name(),
         }
     }
 
@@ -60,6 +70,14 @@ impl Backend {
     }
 
     async fn search(&mut self, query: &str, mode: SearchMode) -> anyhow::Result<Vec<Movie>> {
+        if matches!(self.kind, BackendKind::Lk21(_) | BackendKind::Tokusatsu(_)) {
+            return match &mut self.kind {
+                BackendKind::Lk21(source) => source.search(query, mode).await,
+                BackendKind::Tokusatsu(source) => source.search(query, mode).await,
+                _ => unreachable!(),
+            };
+        }
+
         if self.allow_fallback() && matches!(self.kind, BackendKind::Otakudesu(_)) {
             let mut primary = Animeku::new();
             if let Ok(items) = primary.search(query, mode).await {
@@ -110,7 +128,9 @@ impl Backend {
                 };
                 source.search(query, fallback_mode).await
             }
-            BackendKind::Animeku(_) => unreachable!(),
+            BackendKind::Animeku(_) | BackendKind::Lk21(_) | BackendKind::Tokusatsu(_) => {
+                unreachable!()
+            }
         }
     }
 
@@ -119,6 +139,16 @@ impl Backend {
         query: Option<&str>,
         mode: SearchMode,
     ) -> anyhow::Result<Listing> {
+        if matches!(self.kind, BackendKind::Lk21(_) | BackendKind::Tokusatsu(_)) {
+            return match &mut self.kind {
+                BackendKind::Lk21(source) => source.search_listing(query.unwrap_or(""), mode).await,
+                BackendKind::Tokusatsu(source) => {
+                    source.search_listing(query.unwrap_or(""), mode).await
+                }
+                _ => unreachable!(),
+            };
+        }
+
         if let BackendKind::Animeku(_) = self.kind {
             let result = match &mut self.kind {
                 BackendKind::Animeku(source) => {
@@ -173,15 +203,18 @@ impl Backend {
                 let items = source.search(query, fallback_mode).await?;
                 Ok(Listing { items, next: None })
             }
-            BackendKind::Animeku(_) => unreachable!(),
+            BackendKind::Animeku(_) | BackendKind::Lk21(_) | BackendKind::Tokusatsu(_) => {
+                unreachable!()
+            }
         }
     }
 
     async fn listing(&mut self, url: &str) -> anyhow::Result<Listing> {
         match &mut self.kind {
             BackendKind::Animeku(source) => source.listing(url).await,
-            BackendKind::Otakudesu(_) => {
-                anyhow::bail!("Halaman berikutnya hanya tersedia di sumber AnimeKu.")
+            BackendKind::Lk21(source) => source.listing(url).await,
+            BackendKind::Otakudesu(_) | BackendKind::Tokusatsu(_) => {
+                anyhow::bail!("Halaman berikutnya tidak tersedia untuk sumber ini.")
             }
         }
     }
@@ -190,6 +223,8 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.episodes(movie).await,
             BackendKind::Otakudesu(source) => source.episodes(movie).await,
+            BackendKind::Lk21(source) => source.episodes(movie).await,
+            BackendKind::Tokusatsu(source) => source.episodes(movie).await,
         }
     }
 
@@ -197,6 +232,8 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.streams(episode).await,
             BackendKind::Otakudesu(source) => source.streams(episode).await,
+            BackendKind::Lk21(source) => source.streams(episode).await,
+            BackendKind::Tokusatsu(source) => source.streams(episode).await,
         }
     }
 
@@ -204,6 +241,8 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.resolve(stream).await,
             BackendKind::Otakudesu(source) => source.resolve(stream).await,
+            BackendKind::Lk21(source) => source.resolve(stream).await,
+            BackendKind::Tokusatsu(source) => source.resolve(stream).await,
         }
     }
 }
@@ -282,12 +321,18 @@ fn parse_source_arg(args: &[String]) -> anyhow::Result<Option<SourceKind>> {
     let value = args
         .get(position + 1)
         .map(|value| value.to_lowercase())
-        .ok_or_else(|| anyhow::anyhow!("--source butuh nilai animeku atau otakudesu"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("--source butuh nilai animeku, otakudesu, jepang, atau tokusatsu")
+        })?;
 
     match value.as_str() {
         "animeku" | "animeku.lol" | "aku" => Ok(Some(SourceKind::Animeku)),
         "otakudesu" | "otakudesu.blog" | "otaku" => Ok(Some(SourceKind::Otakudesu)),
-        other => anyhow::bail!("Sumber '{other}' tidak dikenal. Gunakan animeku atau otakudesu."),
+        "jepang" | "lk21" | "layarkaca21" | "film-jepang" => Ok(Some(SourceKind::Lk21)),
+        "tokusatsu" | "toku" | "tokusatsuindo" => Ok(Some(SourceKind::Tokusatsu)),
+        other => anyhow::bail!(
+            "Sumber '{other}' tidak dikenal. Gunakan animeku, otakudesu, jepang, atau tokusatsu."
+        ),
     }
 }
 
@@ -295,7 +340,7 @@ fn print_help() {
     println!(
         "wibu-cli v{}
 
-Streaming anime subtitle Indonesia lewat terminal, langsung ke MPV.
+Streaming anime, film Jepang, dan tokusatsu lewat terminal, langsung ke MPV.
 
 Pemakaian:
   wibu-cli                     jalankan mode interaktif
@@ -303,23 +348,29 @@ Pemakaian:
   wibu-cli --help              tampilkan bantuan
   wibu-cli --source animeku    paksa sumber AnimeKu (default)
   wibu-cli --source otakudesu  paksa sumber Otakudesu
+  wibu-cli --source jepang     pakai LK21 untuk film/series Jepang
+  wibu-cli --source tokusatsu  pakai Tokusatsuindo untuk Ultraman dkk.
   wibu-cli --probe <judul> [n] uji pencarian, episode, dan resolve
   wibu-cli --resolve <url>     uji resolve satu URL embed
 
-Variabel lingkungan:
-  WIBU_ANIMEKU_BASE   ganti domain AnimeKu (default: https://animeku.lol)
-  WIBU_NO_IMAGE=1     matikan poster di kartu metadata
-  WIBU_BROWSER=1      selalu buka browser, jangan pakai MPV
+Menu interaktif juga punya Film Jepang, Series & drama Jepang, dan
+Tokusatsu (Ultraman, Kamen Rider, Super Sentai).
 
-Sumber utama: AnimeKu (https://animeku.lol)
-Cadangan: Otakudesu (https://otakudesu.blog)
+Variabel lingkungan:
+  WIBU_ANIMEKU_BASE     ganti domain AnimeKu (default: https://animeku.lol)
+  WIBU_LK21_BASE        ganti domain LK21 (default: https://layarkaca21.health)
+  WIBU_TOKUSATSU_BASE   ganti domain Tokusatsuindo
+  WIBU_NO_IMAGE=1       matikan poster di kartu metadata
+  WIBU_BROWSER=1        selalu buka browser, jangan pakai MPV
+
+Sumber anime: AnimeKu (https://animeku.lol), cadangan Otakudesu.
+Sumber Jepang: LK21 (film & series) dan Tokusatsuindo (Ultraman dkk.).
 Dibuat oleh panz-08 - https://github.com/Panz-08/wibu-cli",
         env!("CARGO_PKG_VERSION")
     );
 }
 
 async fn app(source: Option<SourceKind>) -> anyhow::Result<()> {
-    let mut backend = Backend::new(source);
     clearscreen_and_show_banner()?;
 
     loop {
@@ -329,8 +380,24 @@ async fn app(source: Option<SourceKind>) -> anyhow::Result<()> {
         };
 
         let result = match action {
-            MenuAction::Search => search_flow(&mut backend, SearchMode::All).await,
-            MenuAction::Browse(mode) => search_flow(&mut backend, mode).await,
+            MenuAction::Search => {
+                let mut backend = anime_backend(source);
+                search_flow(&mut backend, SearchMode::All).await
+            }
+            MenuAction::Browse(mode) => {
+                let mut backend = anime_backend(source);
+                search_flow(&mut backend, mode).await
+            }
+            MenuAction::Japan(mode) => {
+                let japan_source = if mode == SearchMode::Tokusatsu {
+                    SourceKind::Tokusatsu
+                } else {
+                    SourceKind::Lk21
+                };
+
+                let mut backend = Backend::new(Some(japan_source));
+                search_flow(&mut backend, mode).await
+            }
             MenuAction::Quit => break,
         };
 
@@ -348,14 +415,28 @@ async fn app(source: Option<SourceKind>) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn anime_backend(forced: Option<SourceKind>) -> Backend {
+    let forced = match forced {
+        Some(SourceKind::Animeku) => Some(SourceKind::Animeku),
+        Some(SourceKind::Otakudesu) => Some(SourceKind::Otakudesu),
+        _ => None,
+    };
+
+    Backend::new(forced)
+}
+
 async fn search_flow(backend: &mut Backend, mode: SearchMode) -> anyhow::Result<()> {
-    let query = if mode == SearchMode::All {
-        Some(search_prompt("Cari judul anime")?)
-    } else {
-        optional_query(&format!(
+    let query = match mode {
+        SearchMode::All => Some(search_prompt("Cari judul anime")?),
+        SearchMode::JapanMovie => optional_query("Cari film Jepang (kosongkan untuk jelajah)")?,
+        SearchMode::JapanSeries => {
+            optional_query("Cari series/drama Jepang (kosongkan untuk jelajah)")?
+        }
+        SearchMode::Tokusatsu => optional_query("Cari tokusatsu (kosongkan untuk jelajah)")?,
+        _ => optional_query(&format!(
             "Cari di {} (kosongkan untuk jelajah)",
             mode.short_label()
-        ))?
+        ))?,
     };
 
     clearscreen_and_show_banner()?;
@@ -381,14 +462,23 @@ async fn search_flow(backend: &mut Backend, mode: SearchMode) -> anyhow::Result<
         return Ok(());
     }
 
-    let Some(movie) = pick_listing(backend, listing).await? else {
+    let prompt = if mode.is_japan() {
+        "Pilih judul"
+    } else {
+        "Pilih anime"
+    };
+    let Some(movie) = pick_listing(backend, listing, prompt).await? else {
         return Ok(());
     };
 
     show_anime(backend, movie).await
 }
 
-async fn pick_listing(backend: &mut Backend, listing: Listing) -> anyhow::Result<Option<Movie>> {
+async fn pick_listing(
+    backend: &mut Backend,
+    listing: Listing,
+    prompt: &str,
+) -> anyhow::Result<Option<Movie>> {
     let mut current = listing;
     let mut history: Vec<Listing> = vec![];
 
@@ -403,7 +493,7 @@ async fn pick_listing(backend: &mut Backend, listing: Listing) -> anyhow::Result
         }
         options.push(Pick::Back);
 
-        match choice(options, "Pilih anime", false)? {
+        match choice(options, prompt, false)? {
             Pick::Movie(movie) => return Ok(Some(movie)),
             Pick::Back => return Ok(None),
             Pick::Previous => {
@@ -570,8 +660,13 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
         return Ok(false);
     }
 
-    let title = format!("{} - {}", movie.title, episode.title);
-    match crate::util::play_with_mpv(&url, &title, &episode.id) {
+    let title = if episode.title == movie.title {
+        movie.title.clone()
+    } else {
+        format!("{} - {}", movie.title, episode.title)
+    };
+    let referer = stream.referer.as_deref().unwrap_or(&episode.id);
+    match crate::util::play_with_mpv(&url, &title, referer) {
         Ok(()) => Ok(true),
         Err(err) => {
             error(format!("{err:#}"));
@@ -678,7 +773,18 @@ async fn resolve_probe(url: &str) -> anyhow::Result<()> {
         .build()?;
 
     println!("resolve: {url}");
-    match embed::resolve(&client, url, "https://animeku.lol/").await {
+
+    let mut resolved = None;
+    if url.contains("player.tokusatsuindo.com") || url.contains("drive.google.com") {
+        resolved =
+            Tokusatsuindo::resolve_player_url(&client, url, "https://www.tokusatsuindo.com/").await;
+    }
+
+    if resolved.is_none() {
+        resolved = embed::resolve(&client, url, "https://animeku.lol/").await;
+    }
+
+    match resolved {
         Some(resolved) => println!("OK: {resolved}"),
         None => println!("GAGAL resolve"),
     }

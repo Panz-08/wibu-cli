@@ -10,6 +10,7 @@ use crate::models::SearchMode;
 pub enum MenuAction {
     Search,
     Browse(SearchMode),
+    Japan(SearchMode),
     Quit,
 }
 
@@ -36,6 +37,9 @@ pub fn main_menu() -> anyhow::Result<MenuAction> {
         "Anime ongoing",
         "Anime selesai",
         "Film anime",
+        "Film Jepang",
+        "Series & drama Jepang",
+        "Tokusatsu (Ultraman, Kamen Rider, Sentai)",
         "Keluar",
     ];
 
@@ -50,6 +54,9 @@ pub fn main_menu() -> anyhow::Result<MenuAction> {
         1 => MenuAction::Browse(SearchMode::Ongoing),
         2 => MenuAction::Browse(SearchMode::Completed),
         3 => MenuAction::Browse(SearchMode::Movie),
+        4 => MenuAction::Japan(SearchMode::JapanMovie),
+        5 => MenuAction::Japan(SearchMode::JapanSeries),
+        6 => MenuAction::Japan(SearchMode::Tokusatsu),
         _ => MenuAction::Quit,
     })
 }

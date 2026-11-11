@@ -4,7 +4,9 @@ use crate::models::{Episode, Meta, Movie, SearchMode, Stream};
 
 pub mod animeku;
 pub mod embed;
+pub mod lk21;
 pub mod otakudesu;
+pub mod tokusatsu;
 
 #[async_trait]
 pub trait Source {

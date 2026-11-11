@@ -26,7 +26,8 @@ macro_rules! regex {
 
 /// Ubah potongan HTML menjadi teks satu baris.
 pub fn clean_text(input: &str) -> String {
-    let no_tags = regex!(r"(?s)<[^>]*>").replace_all(input, " ");
+    let cleaned = strip_noise_blocks(input);
+    let no_tags = regex!(r"(?s)<[^>]*>").replace_all(&cleaned, " ");
     let decoded = decode_html_entities(&no_tags);
     let collapsed = regex!(r"\s+").replace_all(decoded.trim(), " ");
     collapsed
@@ -42,9 +43,20 @@ pub fn clean_text(input: &str) -> String {
         .to_string()
 }
 
+/// Buang blok yang isinya kode, bukan teks bacaan. Beberapa halaman sumber
+/// menempelkan script iklan di dalam artikel, jadi jangan sampai ikut tampil.
+fn strip_noise_blocks(input: &str) -> String {
+    regex!(
+        r"(?is)<script\b[^>]*>.*?</script\s*>|<style\b[^>]*>.*?</style\s*>|<noscript\b[^>]*>.*?</noscript\s*>|<!--.*?-->"
+    )
+    .replace_all(input, " ")
+    .to_string()
+}
+
 /// Ubah HTML jadi teks yang masih mempertahankan paragraf.
 pub fn html_to_text(input: &str) -> String {
-    let with_breaks = regex!(r"(?i)</p\s*>|<br\s*/?>").replace_all(input, "\n");
+    let cleaned = strip_noise_blocks(input);
+    let with_breaks = regex!(r"(?i)</p\s*>|<br\s*/?>").replace_all(&cleaned, "\n");
     let no_tags = regex!(r"(?s)<[^>]*>").replace_all(&with_breaks, " ");
     let decoded = decode_html_entities(&no_tags);
 
@@ -188,13 +200,13 @@ pub fn clearscreen_and_show_banner() -> anyhow::Result<()> {
     println!("{}", banner.bright_cyan());
     println!(
         "  {}  {}",
-        "Anime sub indo, langsung di terminal.".bright_white(),
+        "Anime, film Jepang & tokusatsu.".bright_white(),
         format!("v{}  ·  panz-08", env!("CARGO_PKG_VERSION")).dimmed()
     );
     println!(
         "  {}  {}",
-        "Sumber: AnimeKu".dimmed(),
-        "Tekan Ctrl+C kapan saja untuk keluar.".dimmed()
+        "Sumber: AnimeKu · LK21 · Tokusatsuindo".dimmed(),
+        "· Ctrl+C keluar.".dimmed()
     );
     println!();
 
@@ -568,15 +580,21 @@ pub fn mpv_available() -> bool {
 pub fn play_with_mpv(url: &str, title: &str, referer: &str) -> anyhow::Result<()> {
     use anyhow::Context;
 
-    let status = Command::new("mpv")
+    let mut command = Command::new("mpv");
+    command
         .arg("--force-window=yes")
         .arg("--keep-open=no")
         .arg("--save-position-on-quit")
         .arg("--no-terminal")
         .arg("--msg-level=all=warn")
         .arg("--demuxer-lavf-o=extension_picky=0,allowed_segment_extensions=ALL")
-        .arg(format!("--user-agent={}", crate::source::embed::USER_AGENT))
-        .arg(format!("--referrer={referer}"))
+        .arg(format!("--user-agent={}", crate::source::embed::USER_AGENT));
+
+    if !crate::source::embed::host_blocks_referer(url) {
+        command.arg(format!("--referrer={referer}"));
+    }
+
+    let status = command
         .arg(format!("--force-media-title={title}"))
         .arg(url)
         .status()
@@ -594,4 +612,23 @@ pub fn open_in_browser(url: &str) -> anyhow::Result<()> {
 
     open::that(url).context("Gagal membuka browser")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_to_text_skips_scripts_and_styles() {
+        let html = r#"
+            <!-- komentar -->
+            <p>Baris pertama.</p>
+            <script>(function(s){s.dataset.zone='1'})()</script>
+            <style>.ad { display: none }</style>
+            <p>Baris kedua.</p>
+        "#;
+
+        assert_eq!(html_to_text(html), "Baris pertama.\nBaris kedua.");
+        assert_eq!(clean_text(html), "Baris pertama. Baris kedua.");
+    }
 }

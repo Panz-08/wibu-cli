@@ -4,6 +4,9 @@ pub enum SearchMode {
     Ongoing,
     Completed,
     Movie,
+    JapanMovie,
+    JapanSeries,
+    Tokusatsu,
 }
 
 impl SearchMode {
@@ -13,6 +16,9 @@ impl SearchMode {
             SearchMode::Ongoing => "anime ongoing",
             SearchMode::Completed => "anime complete",
             SearchMode::Movie => "film anime",
+            SearchMode::JapanMovie => "film Jepang",
+            SearchMode::JapanSeries => "series Jepang",
+            SearchMode::Tokusatsu => "tokusatsu",
         }
     }
 
@@ -22,7 +28,17 @@ impl SearchMode {
             SearchMode::Ongoing => "ongoing",
             SearchMode::Completed => "selesai",
             SearchMode::Movie => "film",
+            SearchMode::JapanMovie => "film Jepang",
+            SearchMode::JapanSeries => "series Jepang",
+            SearchMode::Tokusatsu => "tokusatsu",
         }
+    }
+
+    pub fn is_japan(self) -> bool {
+        matches!(
+            self,
+            SearchMode::JapanMovie | SearchMode::JapanSeries | SearchMode::Tokusatsu
+        )
     }
 }
 
