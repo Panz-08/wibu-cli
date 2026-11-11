@@ -70,11 +70,16 @@ wibu-cli
 
 ### Binary siap pakai
 
-Kalau tidak mau install Rust, ambil binary Linux x86_64 dari halaman
-[Releases](https://github.com/Panz-08/wibu-cli/releases). Ekstrak, taruh
-`wibu-cli` di `PATH`, lalu jalankan.
+Kalau tidak mau install Rust, ambil binary dari halaman
+[Releases](https://github.com/Panz-08/wibu-cli/releases):
 
-Untuk macOS dan Windows belum ada binary resmi. Build dari source di bawah.
+- Linux x86_64: `wibu-cli-linux-x86_64.tar.gz`
+- macOS Apple Silicon: `wibu-cli-macos-aarch64.tar.gz`
+- Windows x86_64: `wibu-cli-windows-x86_64.zip`
+
+Ekstrak, taruh `wibu-cli` (atau `wibu-cli.exe` di Windows) di `PATH`, lalu
+jalankan. Binary Linux sudah dites; macOS dan Windows baru dibangun otomatis
+oleh CI, belum dites jalan.
 
 ### Dari source
 
