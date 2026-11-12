@@ -6,6 +6,7 @@ pub mod animeku;
 pub mod embed;
 pub mod lk21;
 pub mod otakudesu;
+pub mod samehadaku;
 pub mod tokusatsu;
 
 #[async_trait]

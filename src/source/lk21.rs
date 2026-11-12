@@ -18,6 +18,7 @@ use crate::{
 
 const DEFAULT_BASE: &str = "https://layarkaca21.health";
 const JAPAN_COUNTRY_FALLBACK: u64 = 1096;
+const JAPAN_SERIES_CATEGORY: &str = "3535";
 const PER_PAGE: u32 = 24;
 
 /// Film Jepang dan series/drama Jepang dari LK21.
@@ -199,11 +200,17 @@ impl Lk21 {
 
         {
             let mut pairs = url.query_pairs_mut();
-            pairs.append_pair("muvicountry", &country.to_string());
+            if kind == RestKind::Series {
+                // Kategori `drama-jepang` berisi live-action Jepang. Filter
+                // `muvicountry=1096` saja masih mencampur anime.
+                pairs.append_pair("categories", JAPAN_SERIES_CATEGORY);
+            } else {
+                pairs.append_pair("muvicountry", &country.to_string());
+            }
             pairs.append_pair("per_page", &PER_PAGE.to_string());
             pairs.append_pair("page", &page.to_string());
             pairs.append_pair("_embed", "wp:featuredmedia");
-            pairs.append_pair("_fields", "id,link,title,type,_links,_embedded");
+            pairs.append_pair("_fields", "id,link,title,type,class_list,_links,_embedded");
 
             if !query.trim().is_empty() {
                 pairs.append_pair("search", query.trim());
@@ -380,6 +387,10 @@ fn parse_rest_listing(value: &Value, kind: RestKind) -> Vec<Movie> {
     };
 
     for entry in entries {
+        if is_anime_entry(entry) {
+            continue;
+        }
+
         let Some(movie) = parse_rest_movie(entry, kind) else {
             continue;
         };
@@ -390,6 +401,17 @@ fn parse_rest_listing(value: &Value, kind: RestKind) -> Vec<Movie> {
     }
 
     items
+}
+
+fn is_anime_entry(entry: &Value) -> bool {
+    entry
+        .get("class_list")
+        .and_then(Value::as_array)
+        .is_some_and(|classes| {
+            classes.iter().filter_map(Value::as_str).any(|class| {
+                class == "tag-anime" || class == "category-animation" || class == "category-anime"
+            })
+        })
 }
 
 fn parse_rest_movie(entry: &Value, kind: RestKind) -> Option<Movie> {
@@ -745,6 +767,33 @@ fn absolute_url(base: &str, href: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filters_anime_from_japanese_catalog() {
+        let value: Value = serde_json::from_str(
+            r#"[
+                {
+                    "id": 1,
+                    "type": "tv",
+                    "link": "https://layarkaca21.health/tv/anime-contoh/",
+                    "title": {"rendered": "Anime Contoh"},
+                    "class_list": ["tv", "category-animation", "tag-anime", "muvicountry-japan"]
+                },
+                {
+                    "id": 2,
+                    "type": "tv",
+                    "link": "https://layarkaca21.health/tv/drama-contoh/",
+                    "title": {"rendered": "Drama Contoh"},
+                    "class_list": ["tv", "category-drama-jepang", "muvicountry-japan"]
+                }
+            ]"#,
+        )
+        .unwrap();
+
+        let items = parse_rest_listing(&value, RestKind::Series);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Drama Contoh");
+    }
 
     #[test]
     fn parses_rest_listing_with_poster() {

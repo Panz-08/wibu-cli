@@ -14,6 +14,61 @@ use crate::{regex, util::unescape_js_url};
 pub const USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
+/// Cek apakah URL media benar-benar mengembalikan video. Google Drive kadang
+/// membalas 200 dengan `text/html` kosong saat file kena kuota, dan URL
+/// `googlevideo` bisa kedaluwarsa atau menolak User-Agent non-browser.
+/// URL host lain dianggap valid supaya tidak menambah latensi.
+pub async fn media_url_playable(client: &Client, url: &str) -> bool {
+    if !(url.contains("drive.usercontent.google.com")
+        || url.contains("googlevideo.com")
+        || url.contains("player.tokusatsuindo.com/stream.php"))
+    {
+        return true;
+    }
+
+    let response = client
+        .get(url)
+        .header(header::USER_AGENT, USER_AGENT)
+        .header(header::RANGE, "bytes=0-2048")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await;
+
+    let Ok(response) = response else {
+        return false;
+    };
+
+    if !response.status().is_success() {
+        return false;
+    }
+
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if content_type.contains("text/html") || content_type.contains("application/json") {
+        return false;
+    }
+
+    let content_length = response
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+
+    if content_length == Some(0) {
+        return false;
+    }
+
+    match response.bytes().await {
+        Ok(bytes) => !bytes.is_empty(),
+        Err(_) => false,
+    }
+}
+
 /// Resolve URL embed (iframe player) menjadi tautan video langsung yang bisa
 /// dimainkan MPV. Mendukung player putarin/puterin yang memakai config
 /// terenkripsi AES-256-GCM, iframe berlapis, dan jatuh ke yt-dlp kalau perlu.

@@ -11,7 +11,8 @@ use crate::{
     input::{choice, confirm, main_menu, optional_query, search_prompt, MenuAction},
     models::{Episode, Listing, Meta, Movie, SearchMode, Stream},
     source::{
-        animeku::Animeku, embed, lk21::Lk21, otakudesu::Otakudesu, tokusatsu::Tokusatsuindo, Source,
+        animeku::Animeku, embed, lk21::Lk21, otakudesu::Otakudesu, samehadaku::Samehadaku,
+        tokusatsu::Tokusatsuindo, Source,
     },
     util::{
         clearscreen_and_show_banner, error, info, loading, open_in_browser, print_rule,
@@ -28,6 +29,7 @@ mod util;
 enum SourceKind {
     Animeku,
     Otakudesu,
+    Samehadaku,
     Lk21,
     Tokusatsu,
 }
@@ -35,6 +37,7 @@ enum SourceKind {
 enum BackendKind {
     Animeku(Animeku),
     Otakudesu(Otakudesu),
+    Samehadaku(Samehadaku),
     Lk21(Lk21),
     Tokusatsu(Tokusatsuindo),
 }
@@ -48,6 +51,7 @@ impl Backend {
     fn new(forced: Option<SourceKind>) -> Self {
         let kind = match forced {
             Some(SourceKind::Otakudesu) => BackendKind::Otakudesu(Otakudesu::new()),
+            Some(SourceKind::Samehadaku) => BackendKind::Samehadaku(Samehadaku::new()),
             Some(SourceKind::Lk21) => BackendKind::Lk21(Lk21::new()),
             Some(SourceKind::Tokusatsu) => BackendKind::Tokusatsu(Tokusatsuindo::new()),
             _ => BackendKind::Animeku(Animeku::new()),
@@ -60,6 +64,7 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.name(),
             BackendKind::Otakudesu(source) => source.name(),
+            BackendKind::Samehadaku(source) => source.name(),
             BackendKind::Lk21(source) => source.name(),
             BackendKind::Tokusatsu(source) => source.name(),
         }
@@ -78,7 +83,12 @@ impl Backend {
             };
         }
 
-        if self.allow_fallback() && matches!(self.kind, BackendKind::Otakudesu(_)) {
+        if self.allow_fallback()
+            && matches!(
+                self.kind,
+                BackendKind::Otakudesu(_) | BackendKind::Samehadaku(_)
+            )
+        {
             let mut primary = Animeku::new();
             if let Ok(items) = primary.search(query, mode).await {
                 self.kind = BackendKind::Animeku(primary);
@@ -97,21 +107,34 @@ impl Backend {
                 Ok(items) => return Ok(items),
                 Err(error) if self.allow_fallback() => {
                     warn(format!("AnimeKu gagal: {error:#}"));
-                    let mut fallback = Otakudesu::new();
                     let fallback_mode = if mode == SearchMode::Movie {
                         SearchMode::All
                     } else {
                         mode
                     };
 
-                    match fallback.search(query, fallback_mode).await {
+                    let mut otakudesu = Otakudesu::new();
+                    match otakudesu.search(query, fallback_mode).await {
                         Ok(items) => {
-                            self.kind = BackendKind::Otakudesu(fallback);
+                            self.kind = BackendKind::Otakudesu(otakudesu);
                             warn("Beralih ke Otakudesu untuk sesi ini.");
                             return Ok(items);
                         }
-                        Err(fallback_error) => {
-                            anyhow::bail!("AnimeKu: {error:#}\nOtakudesu: {fallback_error:#}");
+                        Err(otaku_error) => {
+                            warn(format!("Otakudesu gagal: {otaku_error:#}"));
+                            let mut samehadaku = Samehadaku::new();
+                            match samehadaku.search(query, fallback_mode).await {
+                                Ok(items) => {
+                                    self.kind = BackendKind::Samehadaku(samehadaku);
+                                    warn("Beralih ke Samehadaku untuk sesi ini.");
+                                    return Ok(items);
+                                }
+                                Err(sameh_error) => {
+                                    anyhow::bail!(
+                                        "AnimeKu: {error:#}\nOtakudesu: {otaku_error:#}\nSamehadaku: {sameh_error:#}"
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -119,18 +142,43 @@ impl Backend {
             }
         }
 
+        if let BackendKind::Otakudesu(_) = self.kind {
+            let fallback_mode = if mode == SearchMode::Movie {
+                SearchMode::All
+            } else {
+                mode
+            };
+            let result = match &mut self.kind {
+                BackendKind::Otakudesu(source) => source.search(query, fallback_mode).await,
+                _ => unreachable!(),
+            };
+
+            return match result {
+                Ok(items) => Ok(items),
+                Err(error) if self.allow_fallback() => {
+                    warn(format!("Otakudesu gagal: {error:#}"));
+                    let mut samehadaku = Samehadaku::new();
+                    match samehadaku.search(query, fallback_mode).await {
+                        Ok(items) => {
+                            self.kind = BackendKind::Samehadaku(samehadaku);
+                            warn("Beralih ke Samehadaku untuk sesi ini.");
+                            Ok(items)
+                        }
+                        Err(sameh_error) => {
+                            anyhow::bail!("Otakudesu: {error:#}\nSamehadaku: {sameh_error:#}")
+                        }
+                    }
+                }
+                Err(error) => Err(error),
+            };
+        }
+
         match &mut self.kind {
-            BackendKind::Otakudesu(source) => {
-                let fallback_mode = if mode == SearchMode::Movie {
-                    SearchMode::All
-                } else {
-                    mode
-                };
-                source.search(query, fallback_mode).await
-            }
-            BackendKind::Animeku(_) | BackendKind::Lk21(_) | BackendKind::Tokusatsu(_) => {
-                unreachable!()
-            }
+            BackendKind::Samehadaku(source) => source.search(query, mode).await,
+            BackendKind::Animeku(_)
+            | BackendKind::Otakudesu(_)
+            | BackendKind::Lk21(_)
+            | BackendKind::Tokusatsu(_) => unreachable!(),
         }
     }
 
@@ -167,21 +215,34 @@ impl Backend {
                     };
 
                     warn(format!("AnimeKu gagal: {error:#}"));
-                    let mut fallback = Otakudesu::new();
                     let fallback_mode = if mode == SearchMode::Movie {
                         SearchMode::All
                     } else {
                         mode
                     };
 
-                    match fallback.search(query, fallback_mode).await {
+                    let mut otakudesu = Otakudesu::new();
+                    match otakudesu.search(query, fallback_mode).await {
                         Ok(items) => {
-                            self.kind = BackendKind::Otakudesu(fallback);
+                            self.kind = BackendKind::Otakudesu(otakudesu);
                             warn("Beralih ke Otakudesu untuk sesi ini.");
                             return Ok(Listing { items, next: None });
                         }
-                        Err(fallback_error) => {
-                            anyhow::bail!("AnimeKu: {error:#}\nOtakudesu: {fallback_error:#}");
+                        Err(otaku_error) => {
+                            warn(format!("Otakudesu gagal: {otaku_error:#}"));
+                            let mut samehadaku = Samehadaku::new();
+                            match samehadaku.search(query, fallback_mode).await {
+                                Ok(items) => {
+                                    self.kind = BackendKind::Samehadaku(samehadaku);
+                                    warn("Beralih ke Samehadaku untuk sesi ini.");
+                                    return Ok(Listing { items, next: None });
+                                }
+                                Err(sameh_error) => {
+                                    anyhow::bail!(
+                                        "AnimeKu: {error:#}\nOtakudesu: {otaku_error:#}\nSamehadaku: {sameh_error:#}"
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -193,19 +254,47 @@ impl Backend {
             anyhow::bail!("Jelajah halaman hanya tersedia saat memakai AnimeKu.");
         };
 
+        let fallback_mode = if mode == SearchMode::Movie {
+            SearchMode::All
+        } else {
+            mode
+        };
+
+        if let BackendKind::Otakudesu(_) = self.kind {
+            let result = match &mut self.kind {
+                BackendKind::Otakudesu(source) => source.search(query, fallback_mode).await,
+                _ => unreachable!(),
+            };
+
+            return match result {
+                Ok(items) => Ok(Listing { items, next: None }),
+                Err(error) if self.allow_fallback() => {
+                    warn(format!("Otakudesu gagal: {error:#}"));
+                    let mut samehadaku = Samehadaku::new();
+                    match samehadaku.search(query, fallback_mode).await {
+                        Ok(items) => {
+                            self.kind = BackendKind::Samehadaku(samehadaku);
+                            warn("Beralih ke Samehadaku untuk sesi ini.");
+                            Ok(Listing { items, next: None })
+                        }
+                        Err(sameh_error) => {
+                            anyhow::bail!("Otakudesu: {error:#}\nSamehadaku: {sameh_error:#}")
+                        }
+                    }
+                }
+                Err(error) => Err(error),
+            };
+        }
+
         match &mut self.kind {
-            BackendKind::Otakudesu(source) => {
-                let fallback_mode = if mode == SearchMode::Movie {
-                    SearchMode::All
-                } else {
-                    mode
-                };
+            BackendKind::Samehadaku(source) => {
                 let items = source.search(query, fallback_mode).await?;
                 Ok(Listing { items, next: None })
             }
-            BackendKind::Animeku(_) | BackendKind::Lk21(_) | BackendKind::Tokusatsu(_) => {
-                unreachable!()
-            }
+            BackendKind::Animeku(_)
+            | BackendKind::Otakudesu(_)
+            | BackendKind::Lk21(_)
+            | BackendKind::Tokusatsu(_) => unreachable!(),
         }
     }
 
@@ -213,7 +302,7 @@ impl Backend {
         match &mut self.kind {
             BackendKind::Animeku(source) => source.listing(url).await,
             BackendKind::Lk21(source) => source.listing(url).await,
-            BackendKind::Otakudesu(_) | BackendKind::Tokusatsu(_) => {
+            BackendKind::Otakudesu(_) | BackendKind::Samehadaku(_) | BackendKind::Tokusatsu(_) => {
                 anyhow::bail!("Halaman berikutnya tidak tersedia untuk sumber ini.")
             }
         }
@@ -223,6 +312,7 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.episodes(movie).await,
             BackendKind::Otakudesu(source) => source.episodes(movie).await,
+            BackendKind::Samehadaku(source) => source.episodes(movie).await,
             BackendKind::Lk21(source) => source.episodes(movie).await,
             BackendKind::Tokusatsu(source) => source.episodes(movie).await,
         }
@@ -232,6 +322,7 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.streams(episode).await,
             BackendKind::Otakudesu(source) => source.streams(episode).await,
+            BackendKind::Samehadaku(source) => source.streams(episode).await,
             BackendKind::Lk21(source) => source.streams(episode).await,
             BackendKind::Tokusatsu(source) => source.streams(episode).await,
         }
@@ -241,6 +332,7 @@ impl Backend {
         match &self.kind {
             BackendKind::Animeku(source) => source.resolve(stream).await,
             BackendKind::Otakudesu(source) => source.resolve(stream).await,
+            BackendKind::Samehadaku(source) => source.resolve(stream).await,
             BackendKind::Lk21(source) => source.resolve(stream).await,
             BackendKind::Tokusatsu(source) => source.resolve(stream).await,
         }
@@ -322,16 +414,19 @@ fn parse_source_arg(args: &[String]) -> anyhow::Result<Option<SourceKind>> {
         .get(position + 1)
         .map(|value| value.to_lowercase())
         .ok_or_else(|| {
-            anyhow::anyhow!("--source butuh nilai animeku, otakudesu, jepang, atau tokusatsu")
+            anyhow::anyhow!(
+                "--source butuh nilai animeku, otakudesu, samehadaku, jepang, atau tokusatsu"
+            )
         })?;
 
     match value.as_str() {
         "animeku" | "animeku.lol" | "aku" => Ok(Some(SourceKind::Animeku)),
         "otakudesu" | "otakudesu.blog" | "otaku" => Ok(Some(SourceKind::Otakudesu)),
+        "samehadaku" | "samehadaku.today" | "sameh" => Ok(Some(SourceKind::Samehadaku)),
         "jepang" | "lk21" | "layarkaca21" | "film-jepang" => Ok(Some(SourceKind::Lk21)),
         "tokusatsu" | "toku" | "tokusatsuindo" => Ok(Some(SourceKind::Tokusatsu)),
         other => anyhow::bail!(
-            "Sumber '{other}' tidak dikenal. Gunakan animeku, otakudesu, jepang, atau tokusatsu."
+            "Sumber '{other}' tidak dikenal. Gunakan animeku, otakudesu, samehadaku, jepang, atau tokusatsu."
         ),
     }
 }
@@ -348,6 +443,7 @@ Pemakaian:
   wibu-cli --help              tampilkan bantuan
   wibu-cli --source animeku    paksa sumber AnimeKu (default)
   wibu-cli --source otakudesu  paksa sumber Otakudesu
+  wibu-cli --source samehadaku  paksa sumber Samehadaku (cadangan ketiga)
   wibu-cli --source jepang     pakai LK21 untuk film/series Jepang
   wibu-cli --source tokusatsu  pakai Tokusatsuindo untuk Ultraman dkk.
   wibu-cli --probe <judul> [n] uji pencarian, episode, dan resolve
@@ -358,12 +454,13 @@ Tokusatsu (Ultraman, Kamen Rider, Super Sentai).
 
 Variabel lingkungan:
   WIBU_ANIMEKU_BASE     ganti domain AnimeKu (default: https://animeku.lol)
+  WIBU_SAMEHADAKU_BASE  ganti domain Samehadaku (default: https://samehadaku.today)
   WIBU_LK21_BASE        ganti domain LK21 (default: https://layarkaca21.health)
   WIBU_TOKUSATSU_BASE   ganti domain Tokusatsuindo
   WIBU_NO_IMAGE=1       matikan poster di kartu metadata
   WIBU_BROWSER=1        selalu buka browser, jangan pakai MPV
 
-Sumber anime: AnimeKu (https://animeku.lol), cadangan Otakudesu.
+Sumber anime: AnimeKu (https://animeku.lol), cadangan Otakudesu dan Samehadaku.
 Sumber Jepang: LK21 (film & series) dan Tokusatsuindo (Ultraman dkk.).
 Dibuat oleh panz-08 - https://github.com/Panz-08/wibu-cli",
         env!("CARGO_PKG_VERSION")
@@ -419,6 +516,7 @@ fn anime_backend(forced: Option<SourceKind>) -> Backend {
     let forced = match forced {
         Some(SourceKind::Animeku) => Some(SourceKind::Animeku),
         Some(SourceKind::Otakudesu) => Some(SourceKind::Otakudesu),
+        Some(SourceKind::Samehadaku) => Some(SourceKind::Samehadaku),
         _ => None,
     };
 
@@ -618,33 +716,21 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
         }
     };
 
-    let stream = if streams.len() == 1 {
-        streams[0].clone()
+    // Server yang dipilih pengguna dicoba lebih dulu, lalu server lain dipakai
+    // otomatis kalau resolve atau MPV gagal. Ini penting karena satu file
+    // Google Drive bisa kena kuota sementara server lain masih normal.
+    let ordered = if streams.len() == 1 {
+        streams
     } else {
-        choice(streams, "Pilih kualitas / server", false)?
+        let picked = choice(streams.clone(), "Pilih kualitas / server", false)?;
+        let mut ordered = vec![picked.clone()];
+        ordered.extend(
+            streams
+                .into_iter()
+                .filter(|stream| stream.title != picked.title),
+        );
+        ordered
     };
-
-    loading("Menyiapkan tautan video ...");
-    let url = match backend.resolve(&stream).await {
-        Ok(Some(url)) => {
-            println!("berhasil");
-            url
-        }
-        Ok(None) => {
-            println!("gagal");
-            warn("Server ini tidak mengembalikan tautan video.");
-            offer_browser(episode)?;
-            return Ok(false);
-        }
-        Err(err) => {
-            println!("gagal");
-            error(format!("{err:#}"));
-            offer_browser(episode)?;
-            return Ok(false);
-        }
-    };
-
-    println!("  {} {}", "↳".cyan(), truncate(&url, 110).dimmed());
 
     if browser_forced() {
         open_in_browser(&episode.id)?;
@@ -665,17 +751,73 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
     } else {
         format!("{} - {}", movie.title, episode.title)
     };
-    let referer = stream.referer.as_deref().unwrap_or(&episode.id);
-    match crate::util::play_with_mpv(&url, &title, referer) {
-        Ok(()) => Ok(true),
-        Err(err) => {
-            error(format!("{err:#}"));
-            if confirm("Buka di browser sebagai gantinya?", true)? {
-                open_in_browser(&episode.id)?;
+
+    let probe_client = Client::builder()
+        .user_agent(embed::USER_AGENT)
+        .timeout(Duration::from_secs(25))
+        .build()?;
+
+    let total = ordered.len();
+    let mut last_error = None;
+
+    for (index, stream) in ordered.iter().enumerate() {
+        if total > 1 {
+            info(format!(
+                "Server {}/{}: {}",
+                (index + 1).to_string().green(),
+                total,
+                stream.title
+            ));
+        }
+
+        loading("Menyiapkan tautan video ...");
+        let url = match backend.resolve(stream).await {
+            Ok(Some(url)) => {
+                println!("berhasil");
+                url
             }
-            Ok(false)
+            Ok(None) => {
+                println!("gagal");
+                warn("Server ini tidak mengembalikan tautan video.");
+                continue;
+            }
+            Err(resolve_error) => {
+                println!("gagal");
+                warn(format!("Resolve gagal: {resolve_error:#}"));
+                last_error = Some(format!("{resolve_error:#}"));
+                continue;
+            }
+        };
+
+        println!("  {} {}", "↳".cyan(), truncate(&url, 110).dimmed());
+
+        if !embed::media_url_playable(&probe_client, &url).await {
+            warn("Server ini tidak mengembalikan video yang bisa diputar.");
+            last_error = Some(format!("{} tidak valid", stream.title));
+            continue;
+        }
+
+        let referer = stream.referer.as_deref().unwrap_or(&episode.id);
+        match crate::util::play_with_mpv(&url, &title, referer) {
+            Ok(()) => return Ok(true),
+            Err(mpv_error) => {
+                error(format!("{mpv_error:#}"));
+                last_error = Some(format!("{mpv_error:#}"));
+                if index + 1 < total {
+                    warn("Mencoba server berikutnya ...");
+                }
+            }
         }
     }
+
+    if let Some(failure) = last_error {
+        error(format!("Semua server gagal. Terakhir: {failure}"));
+    } else {
+        warn("Semua server gagal diputar.");
+    }
+
+    offer_browser(episode)?;
+    Ok(false)
 }
 
 fn offer_browser(episode: &Episode) -> anyhow::Result<()> {

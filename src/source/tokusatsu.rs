@@ -188,9 +188,12 @@ impl Tokusatsuindo {
         }
 
         if start.contains("player.tokusatsuindo.com") {
-            let ids = player_drive_ids(client, start, referer).await;
-            if let Some(id) = ids.first() {
+            let sources = player_stream_sources(client, start, referer).await;
+            if let Some(id) = sources.drive_ids.first() {
                 return Some(google_drive_direct(id));
+            }
+            if let Some(url) = sources.proxy_urls.first() {
+                return Some(url.clone());
             }
         }
 
@@ -227,13 +230,24 @@ impl Source for Tokusatsuindo {
 
         if let Some(embed_url) = extract_embed_url(&html) {
             if embed_url.contains("player.tokusatsuindo.com") {
-                let ids = player_drive_ids(&self.client, &embed_url, &episode.id).await;
-                for (index, id) in ids.iter().enumerate() {
+                let sources = player_stream_sources(&self.client, &embed_url, &episode.id).await;
+                for (index, id) in sources.drive_ids.iter().enumerate() {
                     let url = google_drive_direct(id);
                     if seen.insert(url.clone()) {
                         streams.push(Stream {
                             title: format!("Google Drive {}", index + 1),
                             url: Some(url),
+                            referer: Some(episode.id.clone()),
+                            mirror: None,
+                        });
+                    }
+                }
+
+                for (index, url) in sources.proxy_urls.iter().enumerate() {
+                    if seen.insert(url.clone()) {
+                        streams.push(Stream {
+                            title: format!("API Source {}", index + 1),
+                            url: Some(url.clone()),
                             referer: Some(episode.id.clone()),
                             mirror: None,
                         });
@@ -291,6 +305,10 @@ impl Source for Tokusatsuindo {
 
         if let Some(id) = drive_file_id(url) {
             return Ok(Some(google_drive_direct(&id)));
+        }
+
+        if url.contains("/stream.php") {
+            return Ok(Some(url.clone()));
         }
 
         let referer = stream.referer.as_deref().unwrap_or(self.base.as_str());
@@ -569,22 +587,52 @@ fn first_iframe_src(html: &str) -> Option<String> {
         .map(|cap| unescape_js_url(&decode_html_entities(&cap[1])))
 }
 
-async fn player_drive_ids(client: &Client, start: &str, referer: &str) -> Vec<String> {
-    let mut ids = vec![];
+struct PlayerSources {
+    drive_ids: Vec<String>,
+    proxy_urls: Vec<String>,
+}
+
+async fn player_stream_sources(client: &Client, start: &str, referer: &str) -> PlayerSources {
+    let mut drive_ids = vec![];
+    let mut proxy_urls = vec![];
 
     if let Some(x_html) = fetch_text(client, start, referer).await {
-        ids.extend(extract_drive_ids(&x_html));
+        drive_ids.extend(extract_drive_ids(&x_html));
 
         if let Some(p_url) = extract_player_next(&x_html) {
             if let Some(p_html) = fetch_text(client, &p_url, start).await {
-                ids.extend(extract_drive_ids(&p_html));
+                drive_ids.extend(extract_drive_ids(&p_html));
+                proxy_urls.extend(extract_proxy_urls(&p_html));
             }
         }
     }
 
     let mut seen = HashSet::new();
-    ids.retain(|id| seen.insert(id.clone()));
-    ids
+    drive_ids.retain(|id| seen.insert(id.clone()));
+
+    let mut seen = HashSet::new();
+    proxy_urls.retain(|url| seen.insert(url.clone()));
+
+    PlayerSources {
+        drive_ids,
+        proxy_urls,
+    }
+}
+
+fn extract_proxy_urls(html: &str) -> Vec<String> {
+    let mut urls = vec![];
+    let mut seen = HashSet::new();
+
+    for cap in regex!(r#"(?s)(https?://player\.tokusatsuindo\.com/stream\.php\?[^"'\s<>\\]+)"#)
+        .captures_iter(html)
+    {
+        let url = unescape_js_url(&decode_html_entities(&cap[1]));
+        if seen.insert(url.clone()) {
+            urls.push(url);
+        }
+    }
+
+    urls
 }
 
 fn extract_player_next(html: &str) -> Option<String> {
@@ -923,6 +971,20 @@ mod tests {
         assert_eq!(
             extract_embed_url(&html).as_deref(),
             Some("https://player.tokusatsuindo.com/x/?t=abc")
+        );
+    }
+
+    #[test]
+    fn extracts_proxy_stream_sources() {
+        let html = r#"
+          const proxySources = [{"label":"API Source 1","url":"https://player.tokusatsuindo.com/stream.php?t=abc&amp;start=1"},{"label":"API Source 1","url":"https://player.tokusatsuindo.com/stream.php?t=abc&amp;start=1"}];
+        "#;
+
+        let urls = extract_proxy_urls(html);
+        assert_eq!(urls.len(), 1);
+        assert_eq!(
+            urls[0],
+            "https://player.tokusatsuindo.com/stream.php?t=abc&start=1"
         );
     }
 
