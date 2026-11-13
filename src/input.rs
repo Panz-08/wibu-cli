@@ -9,6 +9,7 @@ use crate::models::SearchMode;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     Search,
+    Continue,
     Browse(SearchMode),
     Japan(SearchMode),
     Quit,
@@ -34,6 +35,7 @@ fn theme() -> ColorfulTheme {
 pub fn main_menu() -> anyhow::Result<MenuAction> {
     let items = vec![
         "Cari anime",
+        "Lanjutkan tontonan",
         "Anime ongoing",
         "Anime selesai",
         "Film anime",
@@ -51,12 +53,13 @@ pub fn main_menu() -> anyhow::Result<MenuAction> {
 
     Ok(match selected {
         0 => MenuAction::Search,
-        1 => MenuAction::Browse(SearchMode::Ongoing),
-        2 => MenuAction::Browse(SearchMode::Completed),
-        3 => MenuAction::Browse(SearchMode::Movie),
-        4 => MenuAction::Japan(SearchMode::JapanMovie),
-        5 => MenuAction::Japan(SearchMode::JapanSeries),
-        6 => MenuAction::Japan(SearchMode::Tokusatsu),
+        1 => MenuAction::Continue,
+        2 => MenuAction::Browse(SearchMode::Ongoing),
+        3 => MenuAction::Browse(SearchMode::Completed),
+        4 => MenuAction::Browse(SearchMode::Movie),
+        5 => MenuAction::Japan(SearchMode::JapanMovie),
+        6 => MenuAction::Japan(SearchMode::JapanSeries),
+        7 => MenuAction::Japan(SearchMode::Tokusatsu),
         _ => MenuAction::Quit,
     })
 }

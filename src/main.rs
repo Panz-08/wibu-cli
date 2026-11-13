@@ -8,6 +8,7 @@ use colored::Colorize;
 use reqwest::Client;
 
 use crate::{
+    history::HistoryEntry,
     input::{choice, confirm, main_menu, optional_query, search_prompt, MenuAction},
     models::{Episode, Listing, Meta, Movie, SearchMode, Stream},
     source::{
@@ -20,6 +21,7 @@ use crate::{
     },
 };
 
+mod history;
 mod input;
 mod models;
 mod source;
@@ -72,6 +74,16 @@ impl Backend {
 
     fn allow_fallback(&self) -> bool {
         self.forced.is_none()
+    }
+
+    fn source_id(&self) -> &'static str {
+        match &self.kind {
+            BackendKind::Animeku(_) => "animeku",
+            BackendKind::Otakudesu(_) => "otakudesu",
+            BackendKind::Samehadaku(_) => "samehadaku",
+            BackendKind::Lk21(_) => "jepang",
+            BackendKind::Tokusatsu(_) => "tokusatsu",
+        }
     }
 
     async fn search(&mut self, query: &str, mode: SearchMode) -> anyhow::Result<Vec<Movie>> {
@@ -405,6 +417,17 @@ fn run() -> anyhow::Result<()> {
     runtime.block_on(app(source))
 }
 
+fn kind_from_id(value: &str) -> Option<SourceKind> {
+    match value {
+        "animeku" => Some(SourceKind::Animeku),
+        "otakudesu" => Some(SourceKind::Otakudesu),
+        "samehadaku" => Some(SourceKind::Samehadaku),
+        "jepang" => Some(SourceKind::Lk21),
+        "tokusatsu" => Some(SourceKind::Tokusatsu),
+        _ => None,
+    }
+}
+
 fn parse_source_arg(args: &[String]) -> anyhow::Result<Option<SourceKind>> {
     let Some(position) = args.iter().position(|arg| arg == "--source") else {
         return Ok(None);
@@ -449,8 +472,10 @@ Pemakaian:
   wibu-cli --probe <judul> [n] uji pencarian, episode, dan resolve
   wibu-cli --resolve <url>     uji resolve satu URL embed
 
-Menu interaktif juga punya Film Jepang, Series & drama Jepang, dan
-Tokusatsu (Ultraman, Kamen Rider, Super Sentai).
+Menu interaktif juga punya Lanjutkan tontonan, Film Jepang, Series & drama
+Jepang, dan Tokusatsu (Ultraman, Kamen Rider, Super Sentai).
+Riwayat tontonan disimpan di ~/.local/share/wibu-cli/history.json (mengikuti
+XDG_DATA_HOME). Hapus lewat menu Lanjutkan tontonan atau hapus file tersebut.
 
 Variabel lingkungan:
   WIBU_ANIMEKU_BASE     ganti domain AnimeKu (default: https://animeku.lol)
@@ -459,6 +484,7 @@ Variabel lingkungan:
   WIBU_TOKUSATSU_BASE   ganti domain Tokusatsuindo
   WIBU_NO_IMAGE=1       matikan poster di kartu metadata
   WIBU_BROWSER=1        selalu buka browser, jangan pakai MPV
+  WIBU_DATA_DIR=<dir>   lokasi penyimpanan riwayat tontonan
 
 Sumber anime: AnimeKu (https://animeku.lol), cadangan Otakudesu dan Samehadaku.
 Sumber Jepang: LK21 (film & series) dan Tokusatsuindo (Ultraman dkk.).
@@ -481,6 +507,7 @@ async fn app(source: Option<SourceKind>) -> anyhow::Result<()> {
                 let mut backend = anime_backend(source);
                 search_flow(&mut backend, SearchMode::All).await
             }
+            MenuAction::Continue => continue_flow().await,
             MenuAction::Browse(mode) => {
                 let mut backend = anime_backend(source);
                 search_flow(&mut backend, mode).await
@@ -521,6 +548,60 @@ fn anime_backend(forced: Option<SourceKind>) -> Backend {
     };
 
     Backend::new(forced)
+}
+
+async fn continue_flow() -> anyhow::Result<()> {
+    let entries = history::load();
+    if entries.is_empty() {
+        warn("Belum ada riwayat tontonan. Putar satu episode dulu, nanti muncul di sini.");
+        return Ok(());
+    }
+
+    let mut options: Vec<HistoryPick> = entries.into_iter().map(HistoryPick::Entry).collect();
+    options.push(HistoryPick::Clear);
+    options.push(HistoryPick::Back);
+
+    clearscreen_and_show_banner()?;
+    match choice(options, "Lanjutkan tontonan", true)? {
+        HistoryPick::Back => Ok(()),
+        HistoryPick::Clear => {
+            history::clear()?;
+            info("Riwayat tontonan dihapus.");
+            Ok(())
+        }
+        HistoryPick::Entry(entry) => {
+            let Some(kind) = kind_from_id(&entry.source) else {
+                warn("Sumber episode ini tidak dikenal lagi. Riwayat mungkin dari versi lama.");
+                return Ok(());
+            };
+
+            let mut backend = Backend::new(Some(kind));
+            let movie = Movie {
+                id: entry.movie_id.clone(),
+                title: entry.title.clone(),
+                info: entry.info.clone(),
+                poster_url: entry.poster_url.clone(),
+            };
+            let episode = Episode {
+                id: entry.episode_id.clone(),
+                title: entry.episode_title.clone(),
+                number: entry.episode_number,
+                is_series: entry.is_series,
+            };
+
+            clearscreen_and_show_banner()?;
+            match play_episode(&backend, &movie, &episode).await {
+                Ok(true) if episode.is_series => {
+                    if confirm("Buka daftar episode untuk lanjut?", true)? {
+                        show_anime(&mut backend, movie).await?;
+                    }
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
+                Err(error) => Err(error),
+            }
+        }
+    }
 }
 
 async fn search_flow(backend: &mut Backend, mode: SearchMode) -> anyhow::Result<()> {
@@ -733,6 +814,7 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
     };
 
     if browser_forced() {
+        history::record(backend.source_id(), movie, episode);
         open_in_browser(&episode.id)?;
         return Ok(true);
     }
@@ -740,6 +822,7 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
     if !crate::util::mpv_available() {
         warn("MPV tidak ditemukan di PATH.");
         if confirm("Buka di browser sebagai gantinya?", true)? {
+            history::record(backend.source_id(), movie, episode);
             open_in_browser(&episode.id)?;
             return Ok(true);
         }
@@ -799,7 +882,10 @@ async fn play_episode(backend: &Backend, movie: &Movie, episode: &Episode) -> an
 
         let referer = stream.referer.as_deref().unwrap_or(&episode.id);
         match crate::util::play_with_mpv(&url, &title, referer) {
-            Ok(()) => return Ok(true),
+            Ok(()) => {
+                history::record(backend.source_id(), movie, episode);
+                return Ok(true);
+            }
             Err(mpv_error) => {
                 error(format!("{mpv_error:#}"));
                 last_error = Some(format!("{mpv_error:#}"));
@@ -932,6 +1018,23 @@ async fn resolve_probe(url: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Clone)]
+enum HistoryPick {
+    Entry(HistoryEntry),
+    Clear,
+    Back,
+}
+
+impl fmt::Display for HistoryPick {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HistoryPick::Entry(entry) => write!(f, "{entry}"),
+            HistoryPick::Clear => write!(f, "Hapus riwayat tontonan"),
+            HistoryPick::Back => write!(f, "« Kembali ke menu"),
+        }
+    }
 }
 
 #[derive(Clone)]

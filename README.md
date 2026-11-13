@@ -25,6 +25,9 @@ sekalian saya rapikan dan taruh di sini. Kalau ada yang ikut pakai, silakan.
 - Cari Ultraman, Kamen Rider, Super Sentai, dan movie/special.
 - Pilih episode lewat daftar. Anime diurutkan dari episode terbaru; series
   Jepang dan tokusatsu diurutkan dari episode 1.
+- **Lanjutkan tontonan**: episode terakhir yang berhasil diputar tersimpan
+  otomatis, lengkap dengan sumber dan waktunya. Bisa dilanjutkan tanpa mencari
+  ulang. Riwayat bisa dihapus dari menu yang sama.
 - Resolve player langsung ke HLS, MP4, atau Google Drive, lalu buka MPV.
 - Fallback otomatis ke Otakudesu lalu Samehadaku kalau AnimeKu bermasalah.
 - Server episode dicoba berurutan: kalau resolve atau MPV gagal, server
@@ -203,6 +206,12 @@ wibu-cli --source otakudesu          # seluruh sesi memakai Otakudesu
 | `WIBU_TOKUSATSU_BASE` | Ganti domain Tokusatsuindo. Default `https://www.tokusatsuindo.com`. |
 | `WIBU_NO_IMAGE=1` | Matikan poster di kartu metadata. |
 | `WIBU_BROWSER=1` | Selalu buka browser, jangan pakai MPV. |
+| `WIBU_DATA_DIR=<dir>` | Ganti lokasi penyimpanan riwayat tontonan. |
+
+Riwayat tontonan disimpan sebagai JSON di `~/.local/share/wibu-cli/history.json`
+(atau mengikuti `XDG_DATA_HOME`). Isinya hanya URL episode, judul, sumber, dan
+waktu tonton — tidak ada data akun atau kredensial. Hapus lewat menu
+**Lanjutkan tontonan → Hapus riwayat tontonan**.
 | `XDG_CACHE_HOME` | Lokasi cache poster. Default `~/.cache/wibu-cli/posters`. |
 
 ## Cara kerja
